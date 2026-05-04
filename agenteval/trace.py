@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 
@@ -155,6 +156,26 @@ class Trace:
 
     def to_json(self, indent: int = 2) -> str:
         return json.dumps(self.to_dict(), indent=indent, default=str)
+
+    def save(self, path: str | None = None, dir: str = ".agenteval_traces") -> str:
+        """Save trace to a JSON file.
+
+        Args:
+            path: Explicit file path. If None, auto-generates from name.
+            dir: Directory to save in (used when path is None).
+
+        Returns:
+            Path to the saved file.
+        """
+        if path is None:
+            d = Path(dir)
+            d.mkdir(parents=True, exist_ok=True)
+            safe_name = (self.name or "trace").replace("/", "_").replace(" ", "_")
+            path = str(d / f"{safe_name}_{int(self.timestamp)}.json")
+        else:
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+        Path(path).write_text(self.to_json())
+        return path
 
     @classmethod
     def from_dict(cls, d: dict) -> Trace:

@@ -1,0 +1,49 @@
+name: 'agenteval'
+description: 'Run agent tests and block PRs on regressions'
+branding:
+  icon: 'check-circle'
+  color: 'purple'
+
+inputs:
+  test-path:
+    description: 'Path to test files or directory'
+    required: false
+    default: 'tests/'
+  snapshot-dir:
+    description: 'Directory containing snapshots'
+    required: false
+    default: '.agenteval_snapshots'
+  python-version:
+    description: 'Python version to use'
+    required: false
+    default: '3.11'
+  fail-on-snapshot-mismatch:
+    description: 'Fail the action if snapshots dont match'
+    required: false
+    default: 'true'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install agenteval
+      shell: bash
+      run: pip install agenteval[pytest]
+
+    - name: Install project dependencies
+      shell: bash
+      run: |
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+        if [ -f pyproject.toml ]; then pip install .; fi
+
+    - name: Run agent tests
+      shell: bash
+      run: |
+        python -m pytest ${{ inputs.test-path }} -v --tb=short 2>&1
+      env:
+        AGENTEVAL_SNAPSHOT_DIR: ${{ inputs.snapshot-dir }}
+        AGENTEVAL_FAIL_ON_MISMATCH: ${{ inputs.fail-on-snapshot-mismatch }}

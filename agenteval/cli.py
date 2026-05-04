@@ -84,5 +84,15 @@ def snapshots(snapshot_dir):
     console.print(table)
 
 
+@main.command()
+@click.option("--port", type=int, default=7600, help="Port to serve on.")
+@click.option("--traces-dir", type=click.Path(), default=".", help="Directory with trace JSON files.")
+@click.option("--snapshots-dir", type=click.Path(), default=".agenteval_snapshots", help="Snapshots directory.")
+def server(port, traces_dir, snapshots_dir):
+    """Launch the web dashboard for viewing traces and snapshots."""
+    from .server import start_server
+    start_server(port=port, traces_dir=traces_dir, snapshots_dir=snapshots_dir)
+
+
 if __name__ == "__main__":
     main()

@@ -19,6 +19,20 @@ from .assertions import (
 from .suite import AgentTestSuite, agent_test
 from .snapshot import snapshot_match
 
+
+def watch(name: str = "agent", providers: list[str] | None = None) -> AgentRecorder:
+    """Auto-instrument all detected LLM providers. Zero config.
+
+    Usage:
+        import agenteval
+        recorder = agenteval.watch()
+        # ... use OpenAI/Anthropic as normal, everything is captured ...
+        trace = recorder.trace
+    """
+    from .integrations.auto import watch as _watch
+    return _watch(name=name, providers=providers)
+
+
 __all__ = [
     "Trace",
     "TraceStep",
@@ -26,6 +40,7 @@ __all__ = [
     "LLMResponse",
     "AgentRecorder",
     "record",
+    "watch",
     "assert_tool_called",
     "assert_tool_not_called",
     "assert_tool_called_with",
