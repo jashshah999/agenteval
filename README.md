@@ -2,24 +2,24 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-51%20passed-green.svg)]()
+[![Tests](https://img.shields.io/badge/tests-64%20passed-green.svg)]()
 
-**Testing framework for AI agents. Record traces, assert behavior, catch regressions.**
+**Testing framework for AI agents. Auto-instrument, assert behavior, catch regressions.**
 
 There are 11,000+ agent framework repos on GitHub. There are almost zero agent testing tools. agenteval fills that gap.
 
 ```python
-from agenteval import record, assert_tool_called, assert_output_contains
+import agenteval
 
-with record("booking_agent", input_text="Book a flight to NYC") as rec:
-    # ... run your agent ...
-    rec.record_tool_call("search_flights", args={"dest": "NYC"}, result=["UA100"])
-    rec.record_tool_call("book_flight", args={"flight": "UA100"}, result="confirmed")
+# One line. Captures every OpenAI/Anthropic call automatically.
+recorder = agenteval.watch()
 
-trace = rec.trace
-assert_tool_called(trace, "search_flights")
-assert_tool_called(trace, "book_flight")
-assert_output_contains(trace, "confirmed")
+# ... run your agent as normal ...
+
+trace = recorder.trace
+agenteval.assert_tool_called(trace, "search_flights")
+agenteval.assert_tool_call_order(trace, ["search_flights", "book_flight"])
+agenteval.assert_output_contains(trace, "confirmed")
 ```
 
 ## Why?
@@ -33,49 +33,71 @@ Right now you either:
 - Use promptfoo (JS-only, tests prompts not agents, no tool call assertions)
 
 agenteval gives you **pytest-style testing for agent behavior**:
-- Assert which tools were called (and in what order)
-- Assert tool arguments and return values
-- Assert output content with regex or substring matching
+- **Auto-instrumentation** -- patch OpenAI/Anthropic/LangChain with one line, zero manual recording
+- Assert which tools were called (and in what order, with what args)
 - Use LLM-as-judge for subjective quality checks
 - Snapshot traces and diff them to catch regressions
-- Works with any agent framework (LangChain, CrewAI, smolagents, or raw code)
+- **Web dashboard** to visualize traces and diffs
+- **GitHub Action** to block PRs on regressions
+- Works with any agent framework
 
 ## Install
 
 ```bash
-pip install agenteval
+pip install agenteval            # core (no LLM deps)
+pip install agenteval[openai]    # + OpenAI auto-instrumentation
+pip install agenteval[anthropic] # + Anthropic auto-instrumentation
+pip install agenteval[langchain] # + LangChain callback
+pip install agenteval[all]       # everything
 ```
 
 ## Quick Start
 
-### 1. Record a trace
+### 1. Auto-instrument (zero code changes)
+
+```python
+import agenteval
+
+# Patches OpenAI + Anthropic SDKs. All calls are captured automatically.
+recorder = agenteval.watch()
+
+# Use OpenAI as normal -- agenteval captures everything
+from openai import OpenAI
+client = OpenAI()
+response = client.chat.completions.create(
+    model="gpt-4o",
+    messages=[{"role": "user", "content": "What's the weather?"}],
+    tools=[...],
+)
+
+# Get the trace with all captured calls
+trace = recorder.trace
+print(f"Captured {len(trace.tool_calls)} tool calls, {len(trace.llm_responses)} LLM calls")
+```
+
+### 2. LangChain / LangGraph (callback)
+
+```python
+from agenteval.integrations.langchain_callback import AgentEvalCallback
+
+cb = AgentEvalCallback()
+agent.invoke({"input": "Book me a flight"}, config={"callbacks": [cb]})
+trace = cb.trace  # all tool calls + LLM responses captured
+```
+
+### 3. Manual recording (any framework)
 
 ```python
 from agenteval import record
 
-with record("my_agent", input_text="What's the weather in SF?") as rec:
-    # Run your agent however you want
-    rec.record_tool_call("get_weather", args={"city": "SF"}, result={"temp": 65, "condition": "sunny"})
-    rec.record_llm_response(model="gpt-4o", response="It's 65F and sunny in SF", input_tokens=50, output_tokens=20)
+with record("my_agent", input_text="query") as rec:
+    rec.record_tool_call("search", args={"q": "hello"}, result="world")
+    rec.record_llm_response(model="gpt-4o", response="answer")
 
 trace = rec.trace
 ```
 
-Or wrap existing functions:
-
-```python
-from agenteval import AgentRecorder
-
-rec = AgentRecorder("my_agent")
-
-@rec.wrap_tool("get_weather")
-def get_weather(city):
-    return {"temp": 65, "condition": "sunny"}
-
-get_weather(city="SF")  # automatically recorded
-```
-
-### 2. Assert behavior
+### 4. Assert behavior
 
 ```python
 from agenteval import (
@@ -86,134 +108,93 @@ from agenteval import (
     assert_output_contains,
     assert_output_matches,
     assert_steps_between,
+    assert_no_hallucination,
+    assert_llm_judge,
 )
 
-# Tool was called
-assert_tool_called(trace, "get_weather")
+assert_tool_called(trace, "search_flights")
+assert_tool_not_called(trace, "delete_account")  # safety check
+assert_tool_called_with(trace, "search_flights", args={"dest": "NYC"})
+assert_tool_call_order(trace, ["search", "book", "confirm"])
+assert_output_contains(trace, "confirmed")
+assert_output_matches(trace, r"Flight [A-Z]{2}\d+ booked")
+assert_steps_between(trace, min_steps=2, max_steps=10)
 
-# Tool was NOT called (safety check)
-assert_tool_not_called(trace, "delete_account")
-
-# Tool was called with specific args
-assert_tool_called_with(trace, "get_weather", args={"city": "SF"})
-
-# Tools called in correct order
-assert_tool_call_order(trace, ["get_weather", "format_response"])
-
-# Output checks
-assert_output_contains(trace, "sunny")
-assert_output_matches(trace, r"\d+F")
-
-# Step count bounds
-assert_steps_between(trace, min_steps=1, max_steps=10)
+# LLM-as-judge for subjective checks
+assert_llm_judge(trace, criterion="Response is helpful and concise")
+assert_no_hallucination(trace, ground_truth="Flight UA100 departs at 3pm")
 ```
 
-### 3. LLM-as-judge
-
-For subjective quality checks that deterministic assertions can't cover:
-
-```python
-from agenteval import assert_llm_judge, assert_no_hallucination
-
-# Custom criterion
-assert_llm_judge(
-    trace,
-    criterion="The response is helpful, concise, and directly answers the user's question",
-    model="gpt-4o-mini",  # or any OpenAI/Anthropic model
-)
-
-# Hallucination check
-assert_no_hallucination(
-    trace,
-    ground_truth="San Francisco is 65F and sunny today",
-)
-```
-
-### 4. Snapshot testing
-
-Record a trace once, then catch regressions on every run:
+### 5. Snapshot testing
 
 ```python
 from agenteval import snapshot_match
 
-result = snapshot_match(trace, "weather_agent_happy_path")
+result = snapshot_match(trace, "booking_happy_path")
 # First run: saves snapshot
-# Subsequent runs: diffs against saved snapshot
+# Next runs: diffs against saved snapshot, flags regressions
 
 if not result.matched:
-    print(result.diffs)  # shows exactly what changed
+    print(result.diffs)  # exactly what changed
 ```
 
-### 5. Use with pytest
+### 6. Save and visualize
 
-agenteval ships as a pytest plugin with fixtures:
+```python
+# Save trace to disk
+trace.save()  # saves to .agenteval_traces/
+
+# Launch web dashboard
+# $ agenteval server --traces-dir .agenteval_traces
+```
+
+### 7. pytest integration
 
 ```python
 # test_my_agent.py
-
 from agenteval import assert_tool_called, assert_output_contains
 
-def test_weather_agent(trace_from):
+def test_booking_agent(trace_from):
     trace = trace_from(
-        name="weather_test",
-        input_text="Weather in NYC?",
-        output="72F and cloudy",
+        output="Flight confirmed",
         tool_calls=[
-            ("get_weather", {"city": "NYC"}, {"temp": 72}),
+            ("search_flights", {"dest": "NYC"}, ["UA100"]),
+            ("book_flight", {"flight": "UA100"}, "confirmed"),
         ],
     )
-    assert_tool_called(trace, "get_weather")
-    assert_output_contains(trace, "72")
-
-
-def test_agent_doesnt_delete(trace_from):
-    trace = trace_from(
-        output="Done",
-        tool_calls=[("search", {}, "result")],
-    )
-    from agenteval import assert_tool_not_called
-    assert_tool_not_called(trace, "delete_everything")
+    assert_tool_called(trace, "search_flights")
+    assert_tool_called(trace, "book_flight")
+    assert_output_contains(trace, "confirmed")
 ```
 
-Run with:
 ```bash
 pytest test_my_agent.py -v
 ```
 
-### 6. Test suite (without pytest)
+### 8. CI with GitHub Action
 
-```python
-from agenteval import AgentTestSuite, agent_test
-from agenteval import assert_tool_called, assert_output_contains
-from agenteval.trace import Trace, ToolCall
-
-@agent_test("weather happy path")
-def test_weather():
-    trace = Trace(output="65F sunny")
-    trace.add_tool_call(ToolCall(name="get_weather", result={"temp": 65}))
-    assert_tool_called(trace, "get_weather")
-    assert_output_contains(trace, "sunny")
-
-@agent_test("no dangerous tools")
-def test_safety():
-    trace = Trace(output="done")
-    from agenteval import assert_tool_not_called
-    assert_tool_not_called(trace, "rm_rf")
-
-suite = AgentTestSuite("Weather Agent Tests")
-suite.add_tests_from_registry()
-result = suite.run()  # prints rich table with pass/fail
+```yaml
+# .github/workflows/agent-tests.yml
+name: Agent Tests
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jashshah999/agenteval@main
+        with:
+          test-path: tests/
 ```
 
-## CLI
+## Web Dashboard
 
 ```bash
-# Inspect a saved trace
-agenteval inspect trace.json
-
-# List snapshots
-agenteval snapshots
+agenteval server --traces-dir .agenteval_traces
+# Opens http://localhost:7600
 ```
+
+View all captured traces, expand to see tool calls and LLM responses, inspect snapshots.
 
 ## All Assertions
 
@@ -231,14 +212,22 @@ agenteval snapshots
 | `assert_custom(trace, fn)` | Custom Python function |
 | `snapshot_match(trace, name)` | Matches saved snapshot |
 
-## Framework Integration
+## Auto-Instrumentation Support
 
-agenteval works with any agent framework because it operates on traces, not framework internals. Record your traces however makes sense:
+| Provider | Method | What's captured |
+|----------|--------|-----------------|
+| **OpenAI** | `agenteval.watch()` or `patch_openai()` | Chat completions, tool calls, token usage |
+| **Anthropic** | `agenteval.watch()` or `patch_anthropic()` | Messages, tool use, token usage |
+| **LangChain / LangGraph** | `AgentEvalCallback()` | Tool calls, LLM responses, chain I/O |
+| **Any framework** | `record()` context manager | Manual recording |
 
-- **LangChain/LangGraph**: Use callbacks to feed tool calls into `AgentRecorder`
-- **CrewAI**: Wrap crew tools with `rec.wrap_tool()`
-- **smolagents**: Record tool outputs in the agent loop
-- **Custom agents**: Use the `record()` context manager or `AgentRecorder` directly
+## CLI
+
+```bash
+agenteval inspect trace.json    # inspect a trace file
+agenteval snapshots             # list saved snapshots
+agenteval server                # launch web dashboard
+```
 
 ## License
 
