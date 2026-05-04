@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agenteval"
+version = "0.1.0"
+description = "Testing framework for AI agents. Record traces, assert behavior, catch regressions."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    {name = "Jash Shah"},
+]
+keywords = ["ai-agents", "testing", "evaluation", "llm", "agent-testing", "pytest"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Framework :: Pytest",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Testing",
+]
+dependencies = [
+    "pydantic>=2.0",
+    "rich>=13.0",
+    "click>=8.0",
+    "openai>=1.0",
+    "anthropic>=0.20",
+]
+
+[project.optional-dependencies]
+langchain = ["langchain-core>=0.2"]
+crewai = ["crewai>=0.50"]
+pytest = ["pytest>=7.0"]
+all = ["agenteval[langchain,crewai,pytest]"]
+dev = ["pytest>=7.0", "ruff>=0.1"]
+
+[project.scripts]
+agenteval = "agenteval.cli:main"
+
+[project.entry-points.pytest11]
+agenteval = "agenteval.pytest_plugin"
+
+[project.urls]
+Homepage = "https://github.com/jashshah999/agenteval"
+Issues = "https://github.com/jashshah999/agenteval/issues"
+
+[tool.setuptools.packages.find]
+include = ["agenteval*"]
+
+[tool.ruff]
+line-length = 100
